@@ -110,9 +110,10 @@ func NewNativeConfig(user, clientVersion string, auth *Auth) (ssh.ClientConfig, 
 	}
 
 	return ssh.ClientConfig{
-		User:          user,
-		Auth:          authMethods,
-		ClientVersion: clientVersion,
+		User:            user,
+		Auth:            authMethods,
+		ClientVersion:   clientVersion,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}, nil
 }
 
