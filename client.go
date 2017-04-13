@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"path"
 
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/machine/libmachine/log"
@@ -52,6 +53,8 @@ type Client interface {
 	// Wait waits for the command started by the Start function to exit. The
 	// returned error follows the same logic as in the exec.Cmd.Wait function.
 	Wait() error
+	//
+	CopyFile(fileReader io.Reader, dstPath string, permissions int) error
 }
 
 // NativeClient is the structure for native client use
@@ -118,9 +121,11 @@ func NewNativeConfig(user, clientVersion string, auth *Auth) (ssh.ClientConfig, 
 }
 
 func (client *NativeClient) dialSuccess() bool {
-	if _, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", client.Hostname, client.Port), &client.Config); err != nil {
+	if conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", client.Hostname, client.Port), &client.Config); err != nil {
 		log.Debugf("Error dialing TCP: %s", err)
 		return false
+	} else {
+		conn.Close()
 	}
 	return true
 }
@@ -134,7 +139,6 @@ func (client *NativeClient) session(command string) (*ssh.Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Mysterious error dialing TCP for SSH (we already succeeded at least once) : %s", err)
 	}
-
 	return conn.NewSession()
 }
 
@@ -205,6 +209,33 @@ func (client *NativeClient) Start(command string) (io.ReadCloser, io.ReadCloser,
 
 	client.openSession = session
 	return ioutil.NopCloser(stdout), ioutil.NopCloser(stderr), nil
+}
+
+// CopyFile copies a file to a remote host
+func (client *NativeClient) CopyFile(file io.Reader, dstPath string, permissions int) (error) {
+	directory := path.Dir(dstPath)
+	filename := path.Base(dstPath)
+	cmd := "/usr/bin/scp -t " + directory
+	cbytes, err := ioutil.ReadAll(file)
+	if err != nil {	return err }
+
+	contents := string(cbytes)
+	header := fmt.Sprintf("C0%o %d %s",permissions, len(contents), filename)
+	session, err := client.session(cmd)
+	if err != nil {	return err }
+	go func() {
+		stdin, _ := session.StdinPipe()
+		defer stdin.Close()
+		fmt.Fprintln(stdin, header)
+		fmt.Fprintln(stdin, contents)
+		fmt.Fprintln(stdin, "\x00")
+	}()
+	err = session.Start(cmd)
+	if err != nil { return err }
+
+	client.openSession = session
+	client.Wait()
+	return nil
 }
 
 // Wait waits for the command started by the Start function to exit. The
