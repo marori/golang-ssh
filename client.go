@@ -53,8 +53,9 @@ type Client interface {
 	// Wait waits for the command started by the Start function to exit. The
 	// returned error follows the same logic as in the exec.Cmd.Wait function.
 	Wait() error
-	//
-	CopyFile(fileReader io.Reader, dstPath string, permissions int) error
+
+	// Copy file with scp
+	CopyFile(fileReader io.Reader, recursive bool, dstPath string, permissions int) error
 }
 
 // NativeClient is the structure for native client use
@@ -212,20 +213,30 @@ func (client *NativeClient) Start(command string) (io.ReadCloser, io.ReadCloser,
 }
 
 // CopyFile copies a file to a remote host
-func (client *NativeClient) CopyFile(file io.Reader, dstPath string, permissions int) (error) {
+func (client *NativeClient) CopyFile(file io.Reader, recursive bool, dstPath string, permissions int) (error) {
 	directory := path.Dir(dstPath)
 	filename := path.Base(dstPath)
+//	fmt.Println("Copying " + dstPath)
 	cmd := "/usr/bin/scp -t " + directory
+	if recursive { cmd = "/usr/bin/scp -tr /" }
+
 	cbytes, err := ioutil.ReadAll(file)
 	if err != nil {	return err }
 
 	contents := string(cbytes)
+	createDir := "D0755 0 " + directory
 	header := fmt.Sprintf("C0%o %d %s",permissions, len(contents), filename)
 	session, err := client.session(cmd)
 	if err != nil {	return err }
 	go func() {
 		stdin, _ := session.StdinPipe()
 		defer stdin.Close()
+		fmt.Println(cmd)
+		if recursive {
+			fmt.Println(createDir)
+			fmt.Fprintln(stdin, createDir)
+		}
+		fmt.Println(header)
 		fmt.Fprintln(stdin, header)
 		fmt.Fprintln(stdin, contents)
 		fmt.Fprintln(stdin, "\x00")
@@ -235,6 +246,7 @@ func (client *NativeClient) CopyFile(file io.Reader, dstPath string, permissions
 
 	client.openSession = session
 	client.Wait()
+	os.Exit(0)
 	return nil
 }
 
